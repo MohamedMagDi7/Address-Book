@@ -210,6 +210,7 @@ color: black;
         </thead>
         <tbody id="view-contacts">
         {{range .Contacts}}
+        {{if .Id}}
         <tr id="contact-row-{{.Id}}">
             <td>{{.FirstName}}</td>
             <td>{{.LastName}}</td>
@@ -218,6 +219,7 @@ color: black;
 
             <td> <button class="delete-btn" onclick="Delete({{.Id}})" >Delete</button></td>
         </tr>
+        {{end}}
         {{end}}
 
 

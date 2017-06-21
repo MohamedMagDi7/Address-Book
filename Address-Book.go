@@ -14,6 +14,7 @@ import (
 
 	"encoding/json"
 
+	"regexp"
 )
 
 type PhoneNum struct {
@@ -41,10 +42,8 @@ type UserContacts struct {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 type GlobalData struct {
  db *sql.DB
- err error
  templates *template.Template
  store *sessions.CookieStore
- User UserContacts
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 type AppHandler struct {
@@ -52,101 +51,107 @@ type AppHandler struct {
 	Handle func(*GlobalData , http.ResponseWriter , *http.Request)
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func SaveUserSession(Context *GlobalData,w http.ResponseWriter , r *http.Request){
-	session , _ := Context.store.Get(r,"CurrentSession")
-	session.Values["user"]=Context.User.UserName
+func validateEmail(email string) bool {
+	Re := regexp.MustCompile(`.`)
+	return Re.MatchString(email)
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+func  SaveUserSession(context *GlobalData, username string , w http.ResponseWriter , r *http.Request){
+	session , _ := context.store.Get(r,"CurrentSession")
+	session.Values["user"]=username
 	session.Save(r,w)
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func GetUserFromSession(Context *GlobalData,r *http.Request) string{
-	session , _ := Context.store.Get(r,"CurrentSession")
-	Usr :=session.Values["user"].(string)
-	return Usr
+func GetUserFromSession(context *GlobalData,r *http.Request) string{
+	session , _ := context.store.Get(r,"CurrentSession")
+	user :=session.Values["user"].(string)
+	return user
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func InsertUser(Context *GlobalData, hashedPassword []byte) error{
-_, err :=Context.db.Exec("INSERT INTO users(username, password) VALUES(?, ?)", Context.User.UserName, hashedPassword)
+func InsertUser(context *GlobalData, username string, hashedPassword []byte) error{
+_, err :=context.db.Exec("INSERT INTO users(username, password) VALUES(?, ?)",username, hashedPassword)
 return err
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func DeleteUser(db *sql.DB,id string) error{
+func (user * UserContacts) DeleteContact(db *sql.DB,id string) error{
 	_ ,err := db.Exec("delete from contact where contactID = ?",id)
 	return err
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func GetUserId(db *sql.DB,username string) (int,error){
+func (user * UserContacts) GetUserId(db *sql.DB) (error){
 	var id int
-	err := db.QueryRow("select id from users where username = ?",username).Scan(&id)
-	return id,err
+	err := db.QueryRow("select id from users where username = ?",user.UserName).Scan(&id)
+	user.Id = strconv.Itoa(id)
+	return err
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func DeleteContactNumber(db *sql.DB,id string) error{
+func (user * UserContacts) DeleteContactNumber(db *sql.DB,id string) error{
 	_ ,err := db.Exec("delete from phonenumbers where id = ?",id)
 	return err
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func CheckUsernameExists(Context *GlobalData) error{
-	var user string
+func CheckUsernameExists(context *GlobalData , username string) error{
+	var userName string
 
-	err := Context.db.QueryRow("SELECT username FROM users WHERE username=?", Context.User.UserName).Scan(&user)
+	err := context.db.QueryRow("SELECT username FROM users WHERE username=?", userName).Scan(&userName)
 	return err
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func GetUserContacts(Context *GlobalData) error{
-	rows, err := Context.db.Query("select contactID,fname,lname,email,id,phonenumber from contact join`phonenumbers` on contact.contactID = phonenumbers.contact_id where userID= ?" , Context.User.Id)
-	var CurrentContact Contact
-	var NewContact Contact
-	var Phone PhoneNum
+func (user * UserContacts) GetUserContacts(context *GlobalData) error{
+	rows, err := context.db.Query("select contactID,fname,lname,email,id,phonenumber from contact join`phonenumbers` on contact.contactID = phonenumbers.contact_id where userID= ?" , user.Id)
+	var currentcontact Contact
+	var newcontact Contact
+	var phone PhoneNum
 
 	for rows.Next() {
 
-		rows.Scan(&NewContact.Id, &NewContact.FirstName, &NewContact.LastName , &NewContact.Email , &Phone.Id , &Phone.Phonenumber )
+		rows.Scan(&newcontact.Id, &newcontact.FirstName, &newcontact.LastName , &newcontact.Email , &phone.Id , &phone.Phonenumber )
 
-		if NewContact.Id!=CurrentContact.Id && CurrentContact.Id != 0{
+		if newcontact.Id!=currentcontact.Id && currentcontact.Id != 0{
 
-			Context.User.Contacts = append(Context.User.Contacts, CurrentContact)
-			CurrentContact = NewContact
+			user.Contacts = append(user.Contacts, currentcontact)
+			currentcontact = newcontact
 
 
-		}else if CurrentContact.Id == 0{
+		}else if currentcontact.Id == 0{
 
-			CurrentContact=NewContact
+			currentcontact=newcontact
 
 		}
-		CurrentContact.PhoneNumber = append(CurrentContact.PhoneNumber, Phone)
+		currentcontact.PhoneNumber = append(currentcontact.PhoneNumber, phone)
 	}
-	Context.User.Contacts = append(Context.User.Contacts, CurrentContact)
+	user.Contacts = append(user.Contacts, currentcontact)
 	return err
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func QueryUser(Context *GlobalData) (string,error){
-	var databaseUsername string
+func QueryUser(context *GlobalData , username string) (string,error){
 	var databasePassword string
 
-	err := Context.db.QueryRow("SELECT username, password FROM users WHERE username=?", Context.User.UserName).Scan(&databaseUsername, &databasePassword)
+	err := context.db.QueryRow("SELECT password FROM users WHERE username=?", username).Scan( &databasePassword)
 
 	return databasePassword,err
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func InsertNewContact(Context *GlobalData, w http.ResponseWriter,r *http.Request) (Contact,error){
+func (user * UserContacts) InsertNewContact(context *GlobalData , w http.ResponseWriter,r *http.Request) (Contact,error){
 //Start Transaction
 
-_ , err := Context.db.Exec("START TRANSACTION")
+_ , err := context.db.Exec("START TRANSACTION")
 if err!=nil {
 return Contact{},err
 }
-fmt.Println(Context.User.Id)
-_, err = Context.db.Exec("insert into contact values(? ,? ,? ,? ,? ) ", nil, r.FormValue("first-name"), r.FormValue("last-name"), r.FormValue("email"), Context.User.Id)
+_, err = context.db.Exec("insert into contact values(? ,? ,? ,? ,? ) ", nil, r.FormValue("first-name"), r.FormValue("last-name"), r.FormValue("email"), user.Id)
 if err != nil {
-	Context.db.Exec("ROLLBACK")
+	context.db.Exec("ROLLBACK")
 	return Contact{},err
 }
-
-row := Context.db.QueryRow("select MAX(contactID) from contact")
+// ana msh fahem y3ni eh "you didn't use Auto Increment column"
+// contactID da AutoIncrement fel DB ana lesa 3aml insert fo2 le contact
+//fa bageb ID bta3 a5er contact defto 3shan ast5demo !
+row := context.db.QueryRow("select MAX(contactID) from contact")
 var id int
 row.Scan(&id)
 
@@ -159,90 +164,92 @@ Email:r.FormValue("email"),
 i := 1
 for r.FormValue("phone" + strconv.Itoa(i)) != "" {
 str := r.FormValue("phone" + strconv.Itoa(i))
-_, err := Context.db.Exec("insert into phonenumbers values(?,?,?)", nil, str , id)
+_, err := context.db.Exec("insert into phonenumbers values(?,?,?)", nil, str , id)
 if err != nil {
-	Context.db.Exec("ROLLBACK")
+	context.db.Exec("ROLLBACK")
 	return Contact{},err
 }
-row := Context.db.QueryRow("select MAX(id) from phonenumbers")
+// nafs el kalam hena msh fahm el moshkela bardo!!
+row := context.db.QueryRow("select MAX(id) from phonenumbers")
 var id int
 row.Scan(&id)
 Phone := PhoneNum{Phonenumber:str , Id:id}
 c.PhoneNumber = append(c.PhoneNumber, Phone)
 i++
 }
-_ , err =Context.db.Exec("COMMIT")
+_ , err =context.db.Exec("COMMIT")
 if err != nil {
 	fmt.Println("bayza")
 	return Contact{}, err
 }
-Context.User.Contacts = append(Context.User.Contacts, c)
+	user.Contacts = append(user.Contacts, c)
 return c , nil
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (AppHand AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	AppHand.Handle(AppHand.GlobalData , w, r)
+func (appHandler AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	appHandler.Handle(appHandler.GlobalData , w, r)
 	return
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func  SignIn(Context *GlobalData, w http.ResponseWriter, r *http.Request ) {
+func  SignIn(context *GlobalData, username string, password string , w http.ResponseWriter, r *http.Request ) {
 	// Grab from the database
+	var err error
 	var databasePassword string
-	databasePassword, Context.err = QueryUser(Context)
-	if Context.err == sql.ErrNoRows {
+	databasePassword, err = QueryUser(context, username)
+	if err == sql.ErrNoRows {
 		//no such user
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 
-	} else if  Context.err != nil {
+	} else if  err != nil {
 		//Database Error
-		http.Error(w,  Context.err.Error(), http.StatusInternalServerError)
+		http.Error(w,  err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	Context.err = bcrypt.CompareHashAndPassword([]byte(databasePassword), []byte(Context.User.Password))
+	err = bcrypt.CompareHashAndPassword([]byte(databasePassword), []byte(password))
 	// If wrong password redirect to the login
-	if  Context.err != nil {
+	if  err != nil {
 		//Wrong Password
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	} else {
 		// If the login succeeded
-		SaveUserSession(Context,w,r)
+		SaveUserSession(context,username,w,r)
 		http.Redirect(w, r, "/userpage", 301)
 		return
 	}
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func Register(Context *GlobalData, w http.ResponseWriter, r *http.Request ){
+func Register(context *GlobalData,username string ,password string , w http.ResponseWriter, r *http.Request ){
 
 
 
-	 Context.err =CheckUsernameExists(Context)
+	err :=CheckUsernameExists(context , username)
 
 	switch {
-	case Context.err == nil:
+	case err == nil:
 		// Username is not available
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
-	case Context.err == sql.ErrNoRows:
+	case err == sql.ErrNoRows:
 		// Username is available
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(Context.User.Password), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
 			fmt.Println("Couldn't Incrypt")
 			http.Error(w,err.Error(),http.StatusInternalServerError)
 			return
 		}
 
-		err = InsertUser(Context,hashedPassword)
+		err = InsertUser(context,username,hashedPassword)
 		if err != nil {
 			http.Error(w,err.Error(),http.StatusInternalServerError)
 			return
 		}
-		SaveUserSession(Context,w,r)
+		SaveUserSession(context,username,w,r)
 		http.Redirect(w, r, "/userpage", http.StatusFound)
 		return
-	case Context.err != nil:
+	case err != nil:
 		//Database Error
 		http.Error(w, "Server error, unable to create your account.", 500)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -253,24 +260,51 @@ func Register(Context *GlobalData, w http.ResponseWriter, r *http.Request ){
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func Login(Context *GlobalData, w http.ResponseWriter, r *http.Request){
+func Login(context *GlobalData, w http.ResponseWriter, r *http.Request){
 
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	Context.User.UserName=username
-	Context.User.Password=password
+	//Inputs Validation
+	if len(username) > 50 {
+		fmt.Println("Username is too long")
+		http.Redirect(w,r,"/home",301)
+		return
+	}
+	if len(password) > 120 {
+
+		fmt.Println("Password is too long")
+		http.Redirect(w,r,"/home",301)
+		return
+	}
+	if username == "" {
+
+		fmt.Println("Please Enter a Username")
+		http.Redirect(w,r,"/home",301)
+		return
+	}
+	if password == "" {
+		fmt.Println("Please Enter a password")
+		http.Redirect(w,r,"/home",301)
+		return
+	}
+	if validateEmail(username) == false {
+		fmt.Println("Please Enter a valid Username")
+		http.Redirect(w,r,"/home",301)
+		return
+	}
+
 	if r.FormValue("register")!="" {
-		Register(Context ,w,r)
+		Register(context , username ,password ,w,r)
 	}else if r.FormValue("login")!="" {
-		SignIn(Context ,w,r)
+		SignIn(context , username ,password ,w,r)
 	}
 
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func Delete(Context *GlobalData,w http.ResponseWriter, r *http.Request){
-	err := DeleteUser(Context.db,r.FormValue("id"))
+func (user  *UserContacts) Delete(context *GlobalData,w http.ResponseWriter, r *http.Request){
+	err := user.DeleteContact(context.db,r.FormValue("id"))
 
 	if err !=nil{
 		fmt.Println("DB error")
@@ -279,8 +313,8 @@ func Delete(Context *GlobalData,w http.ResponseWriter, r *http.Request){
 	}
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func DeleteNum(Context *GlobalData,w http.ResponseWriter, r *http.Request){
-	err := DeleteContactNumber(Context.db , r.FormValue("id"))
+func (user  *UserContacts)  DeleteNum(context *GlobalData,w http.ResponseWriter, r *http.Request){
+	err := user.DeleteContactNumber(context.db , r.FormValue("id"))
 
 	if err !=nil{
 		fmt.Println("DB error")
@@ -289,10 +323,10 @@ func DeleteNum(Context *GlobalData,w http.ResponseWriter, r *http.Request){
 	}
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func  Check(Context *GlobalData, w http.ResponseWriter, r *http.Request) {
+func  Check(context *GlobalData, w http.ResponseWriter, r *http.Request) {
 
-	Usr :=GetUserFromSession(Context , r)
-	if Usr !="" {
+	user :=GetUserFromSession(context , r)
+	if user !="" {
 		http.Redirect(w,r,"/userpage",http.StatusFound)
 		return
 	}else {
@@ -301,34 +335,34 @@ func  Check(Context *GlobalData, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func HomePage(Context *GlobalData, w http.ResponseWriter, r *http.Request) {
+func HomePage(context *GlobalData, w http.ResponseWriter, r *http.Request) {
 
-	if err := Context.templates.ExecuteTemplate(w, "index.html", nil); err != nil {
+	if err := context.templates.ExecuteTemplate(w, "index.html", nil); err != nil {
 		fmt.Println("error home")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func  UserPage(Context *GlobalData,w http.ResponseWriter, r *http.Request){
-	Context.User.Contacts = []Contact{}
-	Username :=GetUserFromSession(Context, r)
+func  (user  *UserContacts) UserPage(context *GlobalData,w http.ResponseWriter, r *http.Request){
+	Username :=GetUserFromSession(context, r)
+	user.Contacts= nil
 	if Username==""{
 		http.Redirect(w,r,"/home",http.StatusFound)
 		return
 	}
-	id , err := GetUserId(Context.db , Username)
-	Context.User.UserName =Username
-	Context.User.Id=strconv.Itoa(id)
-	err =GetUserContacts(Context)
+	user.UserName=Username
+	err := user.GetUserId(context.db)
+
+	err =user.GetUserContacts(context)
 	if err!=nil{
 		fmt.Println("DB error")
 		http.Error(w,err.Error(),http.StatusInternalServerError)
 		return
 	}
-
-	if err := Context.templates.ExecuteTemplate(w, "userpage.html", Context.User); err != nil {
-		http.Error(w, Context.err.Error(), http.StatusInternalServerError)
+	fmt.Println(user)
+	if err := context.templates.ExecuteTemplate(w, "userpage.html", user); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		fmt.Println("error")
 		return
 
@@ -336,18 +370,44 @@ func  UserPage(Context *GlobalData,w http.ResponseWriter, r *http.Request){
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func  AddContact(Context *GlobalData,w http.ResponseWriter, r *http.Request) {
+func (user  *UserContacts)  AddContact(context *GlobalData, w http.ResponseWriter, r *http.Request) {
 
-	Username :=GetUserFromSession(Context,r)
-	Context.User.UserName=Username
-	//Validate there are no empty fields
+	Username :=GetUserFromSession(context,r)
+	user.UserName=Username
+	//Validate Inputs
 
-	if len(r.FormValue("first-name"))==0 || len(r.FormValue("last-name"))==0 || len(r.FormValue("email"))==0 {
-		http.Error(w, "empty fields", http.StatusInternalServerError)
+	if r.FormValue("first-name")=="" || r.FormValue("last-name") == "" || r.FormValue("email") == "" {
+		fmt.Println("Empty Fields")
+		http.Redirect(w,r,"/home",301)
 		return
 	}
 
-	c , err := InsertNewContact(Context,w , r)
+	if len(r.FormValue("first-name")) > 50 {
+		fmt.Println("First Name is too long")
+		http.Redirect(w,r,"/userpage",301)
+		return
+	}
+
+	if len(r.FormValue("last-name")) > 50 {
+		fmt.Println("Last Name is too long")
+		http.Redirect(w,r,"/userpage",301)
+		return
+	}
+
+	if len(r.FormValue("email")) > 50 {
+		fmt.Println("email is too long")
+		http.Redirect(w,r,"/userpage",301)
+		return
+	}
+
+	if validateEmail(r.FormValue("email")) == false {
+		fmt.Println("Please enter a valid contact email!")
+		http.Redirect(w,r,"/userpage",301)
+		return
+	}
+
+
+	c , err := user.InsertNewContact(context,w , r)
 	if err !=nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -359,9 +419,12 @@ func  AddContact(Context *GlobalData,w http.ResponseWriter, r *http.Request) {
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func  Logout(Context *GlobalData,w http.ResponseWriter, r *http.Request){
-	Context.User=UserContacts{}
-	SaveUserSession(Context , w ,r)
+func (user  *UserContacts)  Logout(context *GlobalData,w http.ResponseWriter, r *http.Request){
+	user.UserName=""
+	user.Id=""
+	user.Password=""
+	user.Contacts=[] Contact{}
+	SaveUserSession(context ,"", w ,r)
 
 	http.Redirect(w,r,"/home",http.StatusFound)
 	return
@@ -378,29 +441,21 @@ func main() {
 	Context := &GlobalData{db:Db ,
 	templates:template.Must(template.ParseFiles("index.html" , "userpage.html")),
 	store :sessions.NewCookieStore([]byte("1819")) }
-
+	User := & UserContacts{}
+	fmt.Println(User)
 	mux :=gmux.NewRouter()
-	//defer MyApp.db.Close()
+	defer Context.db.Close()
 
 	mux.Handle("/", AppHandler{Context,Check})
 	mux.Handle("/home", AppHandler{Context,HomePage})
 	mux.Handle("/login",AppHandler{Context,Login}).Methods("POST")
-	mux.Handle("/userpage", AppHandler{Context,UserPage}).Methods("GET")
-	mux.Handle("/addcontact",AppHandler{Context, AddContact}).Methods("POST")
-	mux.Handle("/logout",AppHandler{Context, Logout})
-	mux.Handle("/delete", AppHandler{Context,Delete})
-	mux.Handle("/deletenum", AppHandler{Context,DeleteNum})
+	mux.Handle("/userpage", AppHandler{Context,User.UserPage}).Methods("GET")
+	mux.Handle("/addcontact",AppHandler{Context, User.AddContact}).Methods("POST")
+	mux.Handle("/logout",AppHandler{Context, User.Logout})
+	mux.Handle("/delete", AppHandler{Context,User.Delete})
+	mux.Handle("/deletenum", AppHandler{Context, User.DeleteNum})
 	n:= negroni.Classic()
 	n.Use(negroni.HandlerFunc(Write))
 	n.UseHandler(mux)
 	n.Run(":9000")
-	//mux.ListenAndServe(":8080", nil)
 }
-
-
-/*func OpenDB() (*sql.DB ,error) {
-	db ,err := sql.Open("mysql", "root:1819@tcp(127.0.0.1:3306)/my_add_bookDB")
-	return db , err
-
-
-}*/

@@ -7,29 +7,8 @@
 
 
 
-    <script>
-
-    function AppendContact(contact){
-       $("#view-contacts").append("<tr id='contact-row-" + contact.Id + "'> <td>" + contact.FirstName + "</td> <td>" + contact.LastName +
-         "</td> <td>" + contact.Email + "</td> <td>" + contact.PhoneNumber+
-         "</td> <td><button class='delete-btn' onclick='DeleteContact(" + contact.Id + ")'>Delete</button></td> </tr>");
-
-            document.getElementById("numbers").innerHTML.reload;
-            alert("done");
-    }
-
-    function Logout()
-    {
-
-        $.ajax({
-        type: 'GET',
-        url: '/logout'
-        });
-    }
-</script>
-
-    <script>
-var count=1;
+<script>
+    var count=1;
     function AboutUs()
     {
     $("#about").show();
@@ -59,19 +38,40 @@ var count=1;
     function add_number()
     {
 
-var html_text = document.createTextNode("Number: ");
-var html_element =document.createElement( "input");
-var att = document.createAttribute("name");
-count= count+1;
-att.value='phone' + count;
-html_element.setAttributeNode(att); 
-     var theDiv =  document.getElementById("numbers");
-theDiv.appendChild(html_text);
-theDiv.appendChild(html_element);
+        var html_text = document.createTextNode("Number: ");
+        var html_element =document.createElement( "input");
+        var att = document.createAttribute("name");
+        count= count+1;
+        att.value='phone' + count;
+        html_element.setAttributeNode(att);
+             var theDiv =  document.getElementById("numbers");
+        theDiv.appendChild(html_text);
+        theDiv.appendChild(html_element);
 
 
     }
+
+    function AppendContact(contact){
+       $("#view-contacts").append("<tr id='contact-row-" + contact.Id + "'> <td>" + contact.FirstName + "</td> <td>" + contact.LastName +
+         "</td> <td>" + contact.Email + "</td> <td>" + contact.PhoneNumber+
+         "</td> <td><button class='delete-btn' onclick='DeleteContact(" + contact.Id + ")'>Delete</button></td> </tr>");
+
+            document.getElementById("numbers").innerHTML.reload;
+            alert("done");
+    }
+
+    function Logout()
+    {
+
+        $.ajax({
+        type: 'GET',
+        url: '/logout'
+        });
+    }
+
 </script>
+
+
 <style>
 
 table, td, th {
@@ -187,7 +187,8 @@ color: black;
             <p><label>First Name    : &emsp;&emsp;<input type="text" name="first-name" required="enabled"></label></p>
             <p><label>Last Name     : &emsp;&emsp;<input type="text" name="last-name" required="enabled"></label></p>
             <p><label>E-mail Address : <input type=email name="email" required="enabled"></label></p>
-          <p>&emsp;&emsp;&emsp;&emsp;&emsp;<label>Phone Number  : <input name="phone1" required="enabled"></label>
+            <p>&emsp;&emsp;&emsp;&emsp;&emsp;<label>Phone Number  : <input name="phone1" required="enabled"></label>
+            <div style="color: red; " >{{.Err}}</div>
             <button class="button button2" name="add-number" value="add_number"  onclick="add_number(); return false" > + </button></p>
 <span id="numbers">
 
@@ -234,6 +235,7 @@ color: black;
 
 
 <script>
+
      function AddContact()
     {
 

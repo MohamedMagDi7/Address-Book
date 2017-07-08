@@ -188,7 +188,6 @@ color: black;
             <p><label>Last Name     : &emsp;&emsp;<input type="text" name="last-name" required="enabled"></label></p>
             <p><label>E-mail Address : <input type=email name="email" required="enabled"></label></p>
             <p>&emsp;&emsp;&emsp;&emsp;&emsp;<label>Phone Number  : <input name="phone1" required="enabled"></label>
-            <div style="color: red; " >{{.Err}}</div>
             <button class="button button2" name="add-number" value="add_number"  onclick="add_number(); return false" > + </button></p>
 <span id="numbers">
 
@@ -216,7 +215,7 @@ color: black;
             <td>{{.FirstName}}</td>
             <td>{{.LastName}}</td>
             <td>{{.Email}}</td>
-            <td>{{range .PhoneNumber}} <object id="number-{{.Id}}"> {{.Phonenumber}} <button class="delete-btn" onclick="DeleteNum({{.Id}})" >Delete</button> </object><br>{{end}}</td>
+            <td>{{range .PhoneNumbersStamped}} <object id="number-{{.Id}}-{{.ContactId}}"> {{.Phonenumber}} <button class="delete-btn" onclick="DeleteNum({{.Id}},{{.ContactId}})" >Delete</button> </object><br>{{end}}</td>
 
             <td> <button class="delete-btn" onclick="Delete({{.Id}})" >Delete</button></td>
         </tr>
@@ -262,13 +261,13 @@ function Delete(Id)
 
     }
 
-    function DeleteNum(Id)
+    function DeleteNum(Id , ContactId)
     {
     $.ajax({
 
-           url: '/deletenum?id=' +Id ,
+           url: '/deletenum?id=' +Id +'&ID=' + ContactId,
            type: 'GET' ,
-           success: $("#number-"+Id).remove()
+           success: $("#number-"+Id+"-"+ContactId).remove()
     });
 
 

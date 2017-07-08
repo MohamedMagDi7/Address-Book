@@ -4,14 +4,13 @@ import (
 	"strconv"
 	"net/http"
 	"html/template"
-	"database/sql"
 	_ "github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
 	"github.com/gorilla/sessions"
 	gmux "github.com/gorilla/mux"
 	"fmt"
 	"github.com/codegangsta/negroni"
-
+	"github.com/gocql/gocql"
 	"encoding/json"
 
 	"regexp"
@@ -22,23 +21,24 @@ type UserSession struct{
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 type PhoneNum struct {
-	Id int64
+	Id int
+	ContactId gocql.UUID
 	Phonenumber string
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 type Contact struct{
-	 Id int
+	 Id gocql.UUID
 	 FirstName string
 	 LastName string
 	 Email string
-	 PhoneNumber []PhoneNum
+	 PhoneNumbersStamped []PhoneNum
+	 PhoneNumbers []string
 
  }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 type UserContacts struct {
 	UserName string
-	Id string
 	Password string
 	Err string
 	Contacts []Contact
@@ -47,7 +47,7 @@ type UserContacts struct {
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 type GlobalData struct {
- db *sql.DB
+ db *gocql.Session
  templates *template.Template
  store *sessions.CookieStore
 }
@@ -57,50 +57,38 @@ type AppHandler struct {
 	Handle func(*GlobalData , http.ResponseWriter , *http.Request)
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user * UserContacts) DeleteContact(db *sql.DB,id string) error{
-	_ ,err := db.Exec("delete from contact where contactID = ?",id)
+func (user * UserContacts) DeleteContact(db *gocql.Session,id string) error{
+	err := db.Query("delete from user_data where username = ? and contact_id = ?",user.UserName , id).Exec()
 	return err
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user * UserContacts) GetUserId(db *sql.DB) (error){
+/*func (user * UserContacts) GetUserId(db *sql.DB) (error){
 	var id int
 	err := db.QueryRow("select id from users where username = ?",user.UserName).Scan(&id)
 	user.Id = strconv.Itoa(id)
 	return err
 
-}
+}*/
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user * UserContacts) DeleteContactNumber(db *sql.DB,id string) error{
-	_ ,err := db.Exec("delete from phonenumbers where id = ?",id)
+func (user * UserContacts) DeleteContactNumber(db *gocql.Session,id string , contactid string) error{
+	err := db.Query("delete contact_phonenumbers[?] from user_data where username = ? and contact_id = ?",id ,user.UserName , contactid ).Exec()
 	return err
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func (user * UserContacts) GetUserContacts(context *GlobalData) error{
-	rows, err := context.db.Query("select contactID,fname,lname,email,id,phonenumber from contact join`phonenumbers` on contact.contactID = phonenumbers.contact_id where userID= ?" , user.Id)
-	var currentcontact Contact
+
 	var newcontact Contact
-	var phone PhoneNum
-
-	for rows.Next() {
-
-		rows.Scan(&newcontact.Id, &newcontact.FirstName, &newcontact.LastName , &newcontact.Email , &phone.Id , &phone.Phonenumber )
-
-		if newcontact.Id!=currentcontact.Id && currentcontact.Id != 0{
-
-			user.Contacts = append(user.Contacts, currentcontact)
-			currentcontact = newcontact
-
-
-		}else if currentcontact.Id == 0{
-
-			currentcontact=newcontact
-
-		}
-		currentcontact.PhoneNumber = append(currentcontact.PhoneNumber, phone)
+	rows := context.db.Query("select contact_id,contact_email,contact_fname,contact_lname,contact_phonenumbers from user_data where username= ?" , user.UserName)
+	scanner :=rows.Iter().Scanner()
+	for scanner.Next(){
+		scanner.Scan(&newcontact.Id , &newcontact.Email, &newcontact.FirstName , &newcontact.LastName , &newcontact.PhoneNumbers)
+		newcontact = StampContactId(newcontact)
+		user.Contacts = append(user.Contacts, newcontact)
 	}
-	user.Contacts = append(user.Contacts, currentcontact)
+
+	err := rows.Iter().Close()
 	return err
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -112,9 +100,9 @@ func  (user  *UserContacts) UserPage(context *GlobalData,w http.ResponseWriter, 
 		return
 	}
 	user.UserName=username
-	err := user.GetUserId(context.db)
+	//err := user.GetUserId(context.db)
 
-	err =user.GetUserContacts(context)
+	err :=user.GetUserContacts(context)
 	if err!=nil{
 		fmt.Println("DB error")
 		http.Error(w,err.Error(),http.StatusInternalServerError)
@@ -133,7 +121,6 @@ func (user  *UserContacts) AddContact(context *GlobalData, w http.ResponseWriter
 	user.Err=""
 	Username :=GetUserFromSession(context,r)
 	user.UserName=Username
-	fmt.Println("Add contact")
 	//Validate Inputs
 
 	if r.FormValue("first-name")=="" || r.FormValue("last-name") == "" || r.FormValue("email") == "" {
@@ -173,7 +160,7 @@ func (user  *UserContacts) AddContact(context *GlobalData, w http.ResponseWriter
 		return
 	}
 
-
+	fmt.Println("before insert")
 	c , err := user.InsertNewContact(context , w , r)
 	if err !=nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -188,7 +175,6 @@ func (user  *UserContacts) AddContact(context *GlobalData, w http.ResponseWriter
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func (user  *UserContacts)  Logout(context *GlobalData,w http.ResponseWriter, r *http.Request){
 	user.UserName=""
-	user.Id=""
 	user.Password=""
 	user.Contacts=[] Contact{}
 	SaveUserSession(context ,"", w ,r)
@@ -198,47 +184,48 @@ func (user  *UserContacts)  Logout(context *GlobalData,w http.ResponseWriter, r 
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+func StampContactId (contact  Contact) Contact{
+	i :=0
+	contact.PhoneNumbersStamped = []PhoneNum{}
+	fmt.Println(len(contact.PhoneNumbers))
+	contactid := contact.Id
+	for i<len(contact.PhoneNumbers){
+		numberid := i
+		phonenumber := contact.PhoneNumbers[i]
+		contact.PhoneNumbersStamped = append(contact.PhoneNumbersStamped , PhoneNum{ContactId:contactid , Id:numberid , Phonenumber:phonenumber})
+		i++
+	}
+	return contact
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 func (user * UserContacts) InsertNewContact(context *GlobalData , w http.ResponseWriter,r *http.Request) (Contact,error){
-//Start Transaction
 
-_ , err := context.db.Exec("START TRANSACTION")
-if err!=nil {
-return Contact{},err
-}
+var phonenumbers [] string
 
-res, _err := context.db.Exec("insert into contact values(? ,? ,? ,? ,? ) ", nil, r.FormValue("first-name"), r.FormValue("last-name"), r.FormValue("email"), user.Id)
-if _err != nil {
-	context.db.Exec("ROLLBACK")
-	return Contact{},err
-}
-	id , _ := res.LastInsertId()
-
-c := Contact{
-FirstName:r.FormValue("first-name"),
-LastName:r.FormValue("last-name"),
-Email:r.FormValue("email"),
-//PhoneNumber:r.FormValue("phone"),
-}
 i := 1
 for r.FormValue("phone" + strconv.Itoa(i)) != "" {
 str := r.FormValue("phone" + strconv.Itoa(i))
-res , err := context.db.Exec("insert into phonenumbers values(?,?,?)", nil, str , id)
-if err != nil {
-	context.db.Exec("ROLLBACK")
-	return Contact{},err
-}
-id , _ := res.LastInsertId()
-Phone := PhoneNum{Phonenumber:str , Id:id}
-c.PhoneNumber = append(c.PhoneNumber, Phone)
+phonenumbers = append(phonenumbers,str)
 i++
 }
-_ , err =context.db.Exec("COMMIT")
-if err != nil {
-	fmt.Println("bayza")
-	return Contact{}, err
+	fmt.Println(phonenumbers)
+c := Contact{
+		FirstName:r.FormValue("first-name"),
+		LastName:r.FormValue("last-name"),
+		Email:r.FormValue("email"),
+		PhoneNumbers:phonenumbers,
 }
+
+	fmt.Println("before query")
+err := context.db.Query("insert into user_data (username ,contact_id , contact_email , contact_fname , contact_lname , contact_phonenumbers ) values(? , uuid() , ? , ? , ? , ? ) ", user.UserName, r.FormValue("email") , r.FormValue("first-name"), r.FormValue("last-name"), phonenumbers  ).Exec()
+	if err !=nil {
+		fmt.Println(err)
+		return Contact{} , err
+	}
+	c = StampContactId(c)
+	fmt.Println(c.PhoneNumbersStamped)
 	user.Contacts = append(user.Contacts, c)
-return c , nil
+	return c , nil
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func (appHandler AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -257,7 +244,7 @@ func (user  *UserContacts) Delete(context *GlobalData,w http.ResponseWriter, r *
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func (user  *UserContacts)  DeleteNum(context *GlobalData,w http.ResponseWriter, r *http.Request){
-	err := user.DeleteContactNumber(context.db , r.FormValue("id"))
+	err := user.DeleteContactNumber(context.db , r.FormValue("id") , r.FormValue("ID"))
 
 	if err !=nil{
 		fmt.Println("DB error")
@@ -279,8 +266,10 @@ func  Check(context *GlobalData, w http.ResponseWriter, r *http.Request) {
 	}
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func CheckUsernameExists(context *GlobalData , username string) error{
-	var userName string
-	_,err := context.db.Query("SELECT username FROM users WHERE username=?", userName)
+	var databasePassword string
+
+	err := context.db.Query("SELECT password FROM user_logins WHERE username=?", username).Scan( &databasePassword)
+	fmt.Println(err)
 	return err
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -298,7 +287,7 @@ func (usersession  *UserSession) SignIn(context *GlobalData, username string, pa
 	var err error
 	var databasePassword string
 	databasePassword, err = QueryUser(context, username)
-	if err == sql.ErrNoRows {
+	if err == gocql.ErrNotFound {
 		//no such user
 		usersession.err="Username doesn't exist"
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -337,7 +326,7 @@ func (usersession  *UserSession) Register(context *GlobalData,username string ,p
 		usersession.err="Please choose a different username"
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
-	case err == sql.ErrNoRows:
+	case err == gocql.ErrNotFound:
 		// Username is available
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
@@ -417,8 +406,7 @@ func Write (w http.ResponseWriter, r *http.Request , next http.HandlerFunc){
 func QueryUser(context *GlobalData , username string) (string,error){
 	var databasePassword string
 
-	err := context.db.QueryRow("SELECT password FROM users WHERE username=?", username).Scan( &databasePassword)
-
+	err := context.db.Query("SELECT password FROM user_logins WHERE username=?", username).Scan( &databasePassword)
 	return databasePassword,err
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -435,13 +423,15 @@ func GetUserFromSession(context *GlobalData,r *http.Request) string{
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func InsertUser(context *GlobalData, username string, hashedPassword []byte) error{
-	_, err :=context.db.Exec("INSERT INTO users(username, password) VALUES(?, ?)",username, hashedPassword)
+	err :=context.db.Query("INSERT INTO user_logins(username, password) VALUES(?, ?)",username, hashedPassword).Exec()
 	return err
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func main() {
-	Db ,_ := sql.Open("mysql", "root:1819@tcp(127.0.0.1:3306)/my_add_bookDB")
+	cluster := gocql.NewCluster("127.0.0.1")
+	cluster.Keyspace = "address_book"
+	Db, _ := cluster.CreateSession()
 	Context := &GlobalData{db:Db ,
 	templates:template.Must(template.ParseFiles("index.html" , "userpage.html")),
 	store :sessions.NewCookieStore([]byte("1819")) }

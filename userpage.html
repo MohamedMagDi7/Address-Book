@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Welcome {{.UserName}}</title>
-    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
 
 
 
@@ -74,15 +74,21 @@
 
 <style>
 
-table, td, th {
+table, td ,th{
     border: 1px solid #ddd;
     text-align: left;
+}
+th {
+    background-color: #4CAF50;
+    color: white;
 }
 
 table {
     border-collapse: collapse;
     width: 100%;
 }
+
+tr:hover {background-color: #f2f2f2}
 
 th, td {
     padding: 15px;
@@ -187,11 +193,11 @@ color: black;
             <p><label>First Name    : &emsp;&emsp;<input type="text" name="first-name" required="enabled"></label></p>
             <p><label>Last Name     : &emsp;&emsp;<input type="text" name="last-name" required="enabled"></label></p>
             <p><label>E-mail Address : <input type=email name="email" required="enabled"></label></p>
-            <p>&emsp;&emsp;&emsp;&emsp;&emsp;<label>Phone Number  : <input name="phone1" required="enabled"></label>
-            <button class="button button2" name="add-number" value="add_number"  onclick="add_number(); return false" > + </button></p>
+            <p><label>Phone Number  : <input name="phone1" required="enabled"></label></p>
 <span id="numbers">
 
 </span>
+        <div style="margin-left: 25em;"> <button class="button button2" style="" name="add-number" value="add_number"  onclick="add_number(); return false" > + </button></div>
 <br>
              <input class="button button2" type="submit" value="Add-Contact"  >
         </form>
@@ -215,7 +221,7 @@ color: black;
             <td>{{.FirstName}}</td>
             <td>{{.LastName}}</td>
             <td>{{.Email}}</td>
-            <td>{{range .PhoneNumbersStamped}} <object id="number-{{.Id}}-{{.ContactId}}"> {{.Phonenumber}} <button class="delete-btn" onclick="DeleteNum({{.Id}},{{.ContactId}})" >Delete</button> </object><br>{{end}}</td>
+            <td>{{range .PhoneNumbersStamped}} <object id="number-{{.Id}}-{{.ContactId}}"> {{.Phonenumber}} <button id="delnum_{{.Id}}_{{.ContactId}}" class="delete-btn" onclick="DeleteNum(this)" >Delete</button> </object><br>{{end}}</td>
 
             <td> <button class="delete-btn" onclick="Delete({{.Id}})" >Delete</button></td>
         </tr>
@@ -261,17 +267,37 @@ function Delete(Id)
 
     }
 
-    function DeleteNum(Id , ContactId)
-    {
-    $.ajax({
 
-           url: '/deletenum?id=' +Id +'&ID=' + ContactId,
+    function DeleteNum(num)
+    {
+        var str =num.id;
+        var res = str.split("_");
+        var contactId = res[2];
+        var numberId = parseInt(res[1],10);
+        $.ajax({
+
+           url: '/deletenum?id=' +numberId +'&ID=' + contactId,
            type: 'GET' ,
-           success: $("#number-"+Id+"-"+ContactId).remove()
+           success: function(data)
+           {
+
+           $("#number-"+numberId+"-"+contactId).remove();
+           var newNumberId = numberId +1;
+           while(document.getElementById("number-"+newNumberId+"-"+contactId))
+           {
+             numberId = newNumberId -1;
+             document.getElementById("number-"+newNumberId+"-"+contactId).setAttribute("id" , "number-"+numberId+"-"+contactId);
+             document.getElementById("delnum_"+newNumberId+"_"+contactId).setAttribute("id" , "delnum_"+numberId+"_"+contactId);
+             newNumberId= newNumberId +1 ;
+           }
+
+           }
+
+
     });
 
+}
 
-    }
 </script>
 
 

@@ -54,7 +54,12 @@ type GlobalData struct {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 type AppHandler struct {
 	*GlobalData
-	Handle func(*GlobalData , http.ResponseWriter , *http.Request)
+	Handle func(  *GlobalData ,http.ResponseWriter , *http.Request )
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+func (appHandler AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request ) {
+	appHandler.Handle(appHandler.GlobalData, w, r )
+	return
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func (user * UserContacts) DeleteContact(db *gocql.Session,id string) error{
@@ -62,14 +67,6 @@ func (user * UserContacts) DeleteContact(db *gocql.Session,id string) error{
 	return err
 
 }
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-/*func (user * UserContacts) GetUserId(db *sql.DB) (error){
-	var id int
-	err := db.QueryRow("select id from users where username = ?",user.UserName).Scan(&id)
-	user.Id = strconv.Itoa(id)
-	return err
-
-}*/
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func (user * UserContacts) DeleteContactNumber(db *gocql.Session,id string , contactid string) error{
 	err := db.Query("delete contact_phonenumbers[?] from user_data where username = ? and contact_id = ?",id ,user.UserName , contactid ).Exec()
@@ -92,15 +89,13 @@ func (user * UserContacts) GetUserContacts(context *GlobalData) error{
 	return err
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func  (user  *UserContacts) UserPage(context *GlobalData,w http.ResponseWriter, r *http.Request){
+func UserPage(context *GlobalData,w http.ResponseWriter, r *http.Request){
 	username :=GetUserFromSession(context, r)
-	user.Contacts= nil
 	if username==""{
 		http.Redirect(w,r,"/home",http.StatusFound)
 		return
 	}
-	user.UserName=username
-	//err := user.GetUserId(context.db)
+	user := UserContacts{Contacts:nil,Err:"",UserName:username}
 
 	err :=user.GetUserContacts(context)
 	if err!=nil{
@@ -117,10 +112,9 @@ func  (user  *UserContacts) UserPage(context *GlobalData,w http.ResponseWriter, 
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user  *UserContacts) AddContact(context *GlobalData, w http.ResponseWriter, r *http.Request) {
-	user.Err=""
+func AddContact(context *GlobalData, w http.ResponseWriter, r *http.Request) {
 	Username :=GetUserFromSession(context,r)
-	user.UserName=Username
+	user := UserContacts{UserName:Username , Err:""}
 	//Validate Inputs
 
 	if r.FormValue("first-name")=="" || r.FormValue("last-name") == "" || r.FormValue("email") == "" {
@@ -173,13 +167,9 @@ func (user  *UserContacts) AddContact(context *GlobalData, w http.ResponseWriter
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user  *UserContacts)  Logout(context *GlobalData,w http.ResponseWriter, r *http.Request){
-	user.UserName=""
-	user.Password=""
-	user.Contacts=[] Contact{}
+func Logout(context *GlobalData,w http.ResponseWriter, r *http.Request){
 	SaveUserSession(context ,"", w ,r)
-
-	http.Redirect(w,r,"/home",http.StatusFound)
+http.Redirect(w,r,"/home",http.StatusFound)
 	return
 
 }
@@ -187,7 +177,6 @@ func (user  *UserContacts)  Logout(context *GlobalData,w http.ResponseWriter, r 
 func StampContactId (contact  Contact) Contact{
 	i :=0
 	contact.PhoneNumbersStamped = []PhoneNum{}
-	fmt.Println(len(contact.PhoneNumbers))
 	contactid := contact.Id
 	for i<len(contact.PhoneNumbers){
 		numberid := i
@@ -228,32 +217,35 @@ err := context.db.Query("insert into user_data (username ,contact_id , contact_e
 	return c , nil
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (appHandler AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	appHandler.Handle(appHandler.GlobalData , w, r)
-	return
-}
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user  *UserContacts) Delete(context *GlobalData,w http.ResponseWriter, r *http.Request){
-	err := user.DeleteContact(context.db,r.FormValue("id"))
+func Delete(context *GlobalData,w http.ResponseWriter, r *http.Request){
+		username :=GetUserFromSession(context,r)
+		user := UserContacts{UserName:username}
+		err := user.DeleteContact(context.db, r.FormValue("id"))
 
-	if err !=nil{
-		fmt.Println("DB error")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-}
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user  *UserContacts)  DeleteNum(context *GlobalData,w http.ResponseWriter, r *http.Request){
-	err := user.DeleteContactNumber(context.db , r.FormValue("id") , r.FormValue("ID"))
+		if err != nil {
+			fmt.Println("DB error")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-	if err !=nil{
-		fmt.Println("DB error")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func  Check(context *GlobalData, w http.ResponseWriter, r *http.Request) {
+func DeleteNum(context *GlobalData,w http.ResponseWriter, r *http.Request){
+	username :=GetUserFromSession(context,r)
+
+		user := UserContacts{UserName:username}
+
+		err := user.DeleteContactNumber(context.db, r.FormValue("id"), r.FormValue("ID"))
+
+		if err != nil {
+			fmt.Println("DB error")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+func (usersession *UserSession) Check( context *GlobalData,w http.ResponseWriter, r *http.Request) {
 
 	user :=GetUserFromSession(context , r)
 	if user !="" {
@@ -274,9 +266,7 @@ func CheckUsernameExists(context *GlobalData , username string) error{
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func (usersession  *UserSession) HomePage(context *GlobalData, w http.ResponseWriter, r *http.Request) {
-	fmt.Println(usersession.err)
 	if err := context.templates.ExecuteTemplate(w, "index.html",usersession.err); err != nil {
-		fmt.Println("error home")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -355,7 +345,7 @@ func (usersession  *UserSession) Register(context *GlobalData,username string ,p
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (usersession  *UserSession)Login(context *GlobalData, w http.ResponseWriter, r *http.Request){
+func (usersession  *UserSession) Login(context *GlobalData, w http.ResponseWriter, r *http.Request){
 
 	username := r.FormValue("username")
 	password := r.FormValue("password")
@@ -410,16 +400,23 @@ func QueryUser(context *GlobalData , username string) (string,error){
 	return databasePassword,err
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func  SaveUserSession(context *GlobalData, username string , w http.ResponseWriter , r *http.Request){
+func SaveUserSession(context *GlobalData, username string , w http.ResponseWriter , r *http.Request){
 	session , _ := context.store.Get(r,"CurrentSession")
 	session.Values["user"]=username
 	session.Save(r,w)
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func GetUserFromSession(context *GlobalData,r *http.Request) string{
+
 	session , _ := context.store.Get(r,"CurrentSession")
-	user :=session.Values["user"].(string)
-	return user
+
+	user , ok := session.Values["user"].(string)
+	if ok {
+		return user
+	}else {
+		return ""
+	}
+
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func InsertUser(context *GlobalData, username string, hashedPassword []byte) error{
@@ -429,32 +426,39 @@ func InsertUser(context *GlobalData, username string, hashedPassword []byte) err
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func main() {
-	cluster := gocql.NewCluster("127.0.0.1")
-	cluster.Keyspace = "address_book"
-	Db, _ := cluster.CreateSession()
-	Context := &GlobalData{db:Db ,
+
+	db, err := StartDBConnection("127.0.0.1" , "address_book")
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+	Context := &GlobalData{db:db ,
 	templates:template.Must(template.ParseFiles("index.html" , "userpage.html")),
 	store :sessions.NewCookieStore([]byte("1819")) }
-	User := & UserContacts{}
 	Usersession := &UserSession{err:""}
 	mux :=gmux.NewRouter()
-	defer Context.db.Close()
 
-	mux.Handle("/", AppHandler{Context,Check})
-	mux.Handle("/home", AppHandler{Context,Usersession.HomePage})
-	mux.Handle("/login",AppHandler{Context,Usersession.Login}).Methods("POST")
-	mux.Handle("/userpage", AppHandler{Context,User.UserPage}).Methods("GET")
-	mux.Handle("/addcontact",AppHandler{Context, User.AddContact}).Methods("POST")
-	mux.Handle("/logout",AppHandler{Context, User.Logout})
-	mux.Handle("/delete", AppHandler{Context,User.Delete})
-	mux.Handle("/deletenum", AppHandler{Context, User.DeleteNum})
+
+	mux.Handle("/", AppHandler{Context ,Usersession.Check})
+	mux.Handle("/home", AppHandler{Context , Usersession.HomePage })
+	mux.Handle("/login",AppHandler{Context , Usersession.Login}).Methods("POST")
+	mux.Handle("/userpage", AppHandler{Context , UserPage}).Methods("GET")
+	mux.Handle("/addcontact",AppHandler{Context , AddContact}).Methods("POST")
+	mux.Handle("/logout",AppHandler{Context ,Logout})
+	mux.Handle("/delete", AppHandler{Context ,Delete})
+	mux.Handle("/deletenum", AppHandler{Context ,DeleteNum})
 	n:= negroni.Classic()
-	n.Use(negroni.HandlerFunc(Write))
 	n.UseHandler(mux)
-	n.Run(":9000")
+	n.Run(":8000")
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func validateEmail(email string) bool {
 	Re := regexp.MustCompile(`.`)
 	return Re.MatchString(email)
+}
+
+func StartDBConnection(host string , keyspace string ) (*gocql.Session , error){
+	cluster := gocql.NewCluster(host)
+	cluster.Keyspace = keyspace
+	return cluster.CreateSession()
 }

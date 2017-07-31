@@ -39,7 +39,7 @@ type Contact struct{
 
  }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-type UserContacts struct {
+type User struct {
 	UserName string
 	Password string
 	Err string
@@ -71,19 +71,19 @@ func (appHandler AppHandler) ServeHTTP(w http.ResponseWriter, r *http.Request ) 
 	return
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user * UserContacts) DeleteContact(databaseSession * DatabaseSession,id string) error{
-	err := databaseSession.db.Query("delete from user_data where username = ? and contact_id = ?",user.UserName , id).Exec()
+func (contact * Contact) DeleteContact(databaseSession * DatabaseSession, username string , id string) error{
+	err := databaseSession.db.Query("delete from user_data where username = ? and contact_id = ?",username , id).Exec()
 	return err
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user * UserContacts) DeleteContactNumber(databaseSession * DatabaseSession,id string , contactid string) error{
-	err := databaseSession.db.Query("delete contact_phonenumbers[?] from user_data where username = ? and contact_id = ?",id ,user.UserName , contactid ).Exec()
+func (contact * Contact) DeleteContactNumber(databaseSession * DatabaseSession, username string ,id string , contactid string) error{
+	err := databaseSession.db.Query("delete contact_phonenumbers[?] from user_data where username = ? and contact_id = ?",id ,username , contactid ).Exec()
 	return err
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user * UserContacts) GetUserContacts(databaseSession * DatabaseSession) error{
+func (user * User) GetUserContacts(databaseSession * DatabaseSession) error{
 
 	var newcontact Contact
 	rows := databaseSession.db.Query("select contact_id,contact_email,contact_fname,contact_lname,contact_phonenumbers from user_data where username= ?" , user.UserName)
@@ -104,7 +104,7 @@ func (context * UserSession) UserPage(databaseSession * DatabaseSession,w http.R
 		http.Redirect(w,r,"/home",http.StatusFound)
 		return
 	}
-	user := UserContacts{Contacts:nil,Err:"",UserName:username}
+	user := User{Contacts:nil,Err:"",UserName:username}
 
 	err :=user.GetUserContacts(databaseSession)
 	if err!=nil{
@@ -122,8 +122,8 @@ func (context * UserSession) UserPage(databaseSession * DatabaseSession,w http.R
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func (context *UserSession) AddContact(databaseSession * DatabaseSession, w http.ResponseWriter, r *http.Request) {
-	Username :=context.GetUserFromSession(r)
-	user := UserContacts{UserName:Username , Err:""}
+	username := context.GetUserFromSession(r)
+	user := User{UserName:username, Err:""}
 	//Validate Inputs
 
 	if r.FormValue("first-name")=="" || r.FormValue("last-name") == "" || r.FormValue("email") == "" {
@@ -164,12 +164,13 @@ func (context *UserSession) AddContact(databaseSession * DatabaseSession, w http
 	}
 
 	fmt.Println("before insert")
-	c , err := user.InsertNewContact(databaseSession , w , r)
+	contact := &Contact{}
+	err := contact.InsertNewContact(databaseSession , username , w , r)
 	if err !=nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := json.NewEncoder(w).Encode(c); err != nil {
+	if err := json.NewEncoder(w).Encode(contact); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -195,7 +196,7 @@ func (contact * Contact) StampContactId () {
 	}
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user * UserContacts) InsertNewContact(databaseSession * DatabaseSession, w http.ResponseWriter,r *http.Request) (Contact,error){
+func (contact * Contact) InsertNewContact(databaseSession * DatabaseSession, username string , w http.ResponseWriter,r *http.Request) (error){
 
 var phonenumbers [] string
 
@@ -206,29 +207,24 @@ phonenumbers = append(phonenumbers,str)
 i++
 }
 	fmt.Println(phonenumbers)
-c := Contact{
-		FirstName:r.FormValue("first-name"),
-		LastName:r.FormValue("last-name"),
-		Email:r.FormValue("email"),
-		PhoneNumbers:phonenumbers,
-}
+contact.FirstName = r.FormValue("first-name") ; contact.LastName = r.FormValue("last-name")
+contact.Email = r.FormValue("email") ; contact.PhoneNumbers = phonenumbers
 
-	fmt.Println("before query")
-err := databaseSession.db.Query("insert into user_data (username ,contact_id , contact_email , contact_fname , contact_lname , contact_phonenumbers ) values(? , uuid() , ? , ? , ? , ? ) ", user.UserName, r.FormValue("email") , r.FormValue("first-name"), r.FormValue("last-name"), phonenumbers  ).Exec()
+err := databaseSession.db.Query("insert into user_data (username ,contact_id , contact_email , contact_fname , contact_lname , contact_phonenumbers ) values(? , uuid() , ? , ? , ? , ? ) ", username, r.FormValue("email") , r.FormValue("first-name"), r.FormValue("last-name"), phonenumbers  ).Exec()
 	if err !=nil {
 		fmt.Println(err)
-		return Contact{} , err
+		return  err
 	}
-	c.StampContactId()
-	fmt.Println(c.PhoneNumbersStamped)
-	user.Contacts = append(user.Contacts, c)
-	return c , nil
+	contact.StampContactId()
+//	user.Contacts = append(user.Contacts, c)
+	return  nil
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func(context * UserSession) Delete(databaseSession * DatabaseSession,w http.ResponseWriter, r *http.Request){
 		username :=context.GetUserFromSession(r)
-		user := UserContacts{UserName:username}
-		err := user.DeleteContact(databaseSession, r.FormValue("id"))
+		contact := Contact{}
+
+		err := contact.DeleteContact(databaseSession,username, r.FormValue("id"))
 
 		if err != nil {
 			fmt.Println("DB error")
@@ -239,11 +235,10 @@ func(context * UserSession) Delete(databaseSession * DatabaseSession,w http.Resp
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func(context * UserSession) DeleteNum(databaseSession * DatabaseSession,w http.ResponseWriter, r *http.Request){
-	username :=context.GetUserFromSession(r)
+		username :=context.GetUserFromSession(r)
+		contact := Contact{}
 
-		user := UserContacts{UserName:username}
-
-		err := user.DeleteContactNumber(databaseSession, r.FormValue("id"), r.FormValue("ID"))
+		err := contact.DeleteContactNumber(databaseSession, username,r.FormValue("id"), r.FormValue("ID"))
 
 		if err != nil {
 			fmt.Println("DB error")
@@ -265,7 +260,7 @@ func (context *UserSession) Check(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user *UserContacts) CheckUsernameExists(databaseSession * DatabaseSession ) error{
+func (user *User) CheckUsernameExists(databaseSession * DatabaseSession ) error{
 	var databasePassword string
 
 	err := databaseSession.db.Query("SELECT password FROM user_logins WHERE username=?", user.UserName).Scan( &databasePassword)
@@ -283,7 +278,7 @@ func (context  *UserSession) HomePage(w http.ResponseWriter, r *http.Request) {
 func (context  *UserSession) SignIn(databaseSession * DatabaseSession, username string, password string , w http.ResponseWriter, r *http.Request ) {
 	// Grab from the database
 	var err error
-	user :=UserContacts{UserName:username}
+	user :=User{UserName:username}
 	var databasePassword string
 	databasePassword, err = user.QueryUser(databaseSession)
 	if err == gocql.ErrNotFound {
@@ -316,7 +311,7 @@ func (context  *UserSession) SignIn(databaseSession * DatabaseSession, username 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 func (context  *UserSession) Register(databaseSession * DatabaseSession,username string ,password string , w http.ResponseWriter, r *http.Request ){
 
-	user := UserContacts{UserName:username}
+	user := User{UserName:username}
 
 	err :=user.CheckUsernameExists(databaseSession)
 	switch {
@@ -397,7 +392,7 @@ func (context  *UserSession) Login(databaseSession * DatabaseSession, w http.Res
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user * UserContacts) QueryUser(databaseSession * DatabaseSession) (string,error){
+func (user * User) QueryUser(databaseSession * DatabaseSession) (string,error){
 	var databasePassword string
 
 	err := databaseSession.db.Query("SELECT password FROM user_logins WHERE username=?", user.UserName).Scan( &databasePassword)
@@ -423,7 +418,7 @@ func (context * UserSession) GetUserFromSession(r *http.Request) string{
 
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-func (user * UserContacts) InsertUser(databaseSession * DatabaseSession, hashedPassword []byte) error{
+func (user * User) InsertUser(databaseSession * DatabaseSession, hashedPassword []byte) error{
 	err :=databaseSession.db.Query("INSERT INTO user_logins(username, password) VALUES(?, ?)",user.UserName, hashedPassword).Exec()
 	return err
 
